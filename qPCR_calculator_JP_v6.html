@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>qPCR反応液計算</title>
+  <style>
+    :root { --bg:#f6f7f9; --card:#ffffff; --text:#111827; --muted:#6b7280; --line:#e5e7eb; --accent:#2563eb; --accent2:#eff6ff; --fixed:#f3f4f6; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic", sans-serif; background:var(--bg); color:var(--text); }
+    header { padding:28px 20px 12px; max-width:980px; margin:auto; }
+    h1 { margin:0 0 8px; font-size:28px; }
+    p { margin:0; color:var(--muted); line-height:1.6; }
+    main { max-width:980px; margin:0 auto; padding:16px 20px 40px; display:grid; gap:16px; }
+    .grid { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:16px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+    h2 { margin:0 0 14px; font-size:18px; }
+    label { display:grid; gap:6px; margin:10px 0; font-size:14px; color:#374151; }
+    input { width:100%; border:1px solid #d1d5db; border-radius:10px; padding:10px 12px; font-size:15px; background:white; }
+    input:focus { outline:2px solid var(--accent2); border-color:var(--accent); }
+    table { width:100%; border-collapse:collapse; overflow:hidden; border-radius:12px; }
+    th, td { padding:10px 12px; border-bottom:1px solid var(--line); text-align:right; }
+    th:first-child, td:first-child { text-align:left; }
+    th { background:#f9fafb; color:#374151; font-weight:650; }
+    tr:last-child td { border-bottom:0; }
+    .result { font-weight:700; background:var(--accent2); }
+    .subtle { background:var(--fixed); color:#4b5563; }
+    .note { font-size:13px; color:var(--muted); margin-top:12px; }
+    .actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+    button { border:0; background:var(--accent); color:white; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:650; }
+    button.secondary { background:#111827; }
+    .full { grid-column:1 / -1; }
+    @media (max-width:760px){ .grid { grid-template-columns:1fr; } }
+    @media print { body{background:white;} .card{box-shadow:none;} button{display:none;} }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>qPCR反応液計算</h1>
+    
+  </header>
+
+  <main>
+    <section class="grid">
+      <div class="card">
+        <h2>1. 反応液組成（µL）</h2>
+        <table>
+          <thead><tr><th>項目</th><th>1反応あたり</th></tr></thead>
+          <tbody>
+            <tr><td>滅菌水</td><td>3.6</td></tr>
+            <tr><td>2xSYBR</td><td>5</td></tr>
+            <tr><td>F pri</td><td>0.2</td></tr>
+            <tr><td>R pri</td><td>0.2</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>2. サンプル数・目標遺伝子数</h2>
+        <label>サンプル数 <input id="samples" type="number" step="1" min="1" value="9"></label>
+        <label>目標遺伝子数 <input id="genes" type="number" step="1" min="1" value="3"></label>
+        <div class="actions">
+          <button onclick="window.print()">印刷 / PDF保存</button>
+          <button class="secondary" onclick="resetDefaults()">初期値に戻す</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card full">
+      <h2>3. Master mix（余量あり）</h2>
+      <table>
+        <thead><tr><th>項目</th><th>µL</th></tr></thead>
+        <tbody id="mix"></tbody>
+      </table>
+    </section>
+
+    <section class="card full">
+      <h2>4. cDNA計算（10倍希釈）</h2>
+      <table>
+        <thead><tr><th>項目</th><th>1サンプルあたり（µL）</th></tr></thead>
+        <tbody id="cdna"></tbody>
+      </table>
+    </section>
+
+    <section class="card full">
+      <h2>5. cDNA 10倍希釈計算</h2>
+      <div class="grid">
+        <div>
+          <label>10倍希釈後の総量（µL） <input id="dilutedTotal" type="number" step="0.01" min="0" value="100"></label>
+          <table>
+            <thead><tr><th>項目</th><th>µL</th></tr></thead>
+            <tbody id="dilutionByTotal"></tbody>
+          </table>
+        </div>
+        <div>
+          <label>cDNA原液量（µL） <input id="stockAmount" type="number" step="0.01" min="0" value="10"></label>
+          <table>
+            <thead><tr><th>項目</th><th>µL</th></tr></thead>
+            <tbody id="dilutionByStock"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const defaults = { samples: 9, genes: 3 };
+    const composition = [
+      ["滅菌水", 3.6],
+      ["2xSYBR", 5],
+      ["F pri", 0.2],
+      ["R pri", 0.2]
+    ];
+    const cdnaExtraRate = 1.10;
+    const n = id => Number(document.getElementById(id).value || 0);
+    const fmt = x => Number.isFinite(x) ? x.toFixed(2) : "";
+    function row2(name, val, cls="") { return `<tr class="${cls}"><td>${name}</td><td>${fmt(val)}</td></tr>`; }
+    function rowCdna(name, perSample, cls="") { return `<tr class="${cls}"><td>${name}</td><td>${fmt(perSample)}</td></tr>`; }
+    function calc(){
+      const samples = n("samples");
+      const genes = n("genes");
+
+      const noExtraTotal = 31.5 * samples;
+      const baseCoefficient = noExtraTotal / 9;
+      const coefficientWithExtra = baseCoefficient + 3.5;
+      const masterTotal = 9 * coefficientWithExtra;
+      let mixHtml = "";
+      mixHtml += row2("反応液総量（余量なし）", noExtraTotal, "subtle");
+      mixHtml += row2("係数（余量なし）", baseCoefficient, "subtle");
+      mixHtml += row2("係数（余量あり）", coefficientWithExtra, "subtle");
+      mixHtml += row2("反応液総量（余量あり）", masterTotal, "result");
+      composition.forEach(([name, amount]) => { mixHtml += row2(name, amount * coefficientWithExtra); });
+      document.getElementById("mix").innerHTML = mixHtml;
+
+      const cdnaNoExtraPerSample = genes * 3.5;
+      const cdnaWithExtraPerSample = cdnaNoExtraPerSample * cdnaExtraRate;
+      const stockCdnaPerSample = cdnaWithExtraPerSample / 10;
+      const waterPerSample = cdnaWithExtraPerSample * 9 / 10;
+      let cdnaHtml = "";
+      cdnaHtml += rowCdna("10倍希釈cDNA量（余量なし）", cdnaNoExtraPerSample, "subtle");
+      cdnaHtml += rowCdna("10倍希釈cDNA量（余量あり）", cdnaWithExtraPerSample, "result");
+      cdnaHtml += rowCdna("cDNA原液", stockCdnaPerSample);
+      cdnaHtml += rowCdna("滅菌水", waterPerSample);
+      document.getElementById("cdna").innerHTML = cdnaHtml;
+
+      const dilutedTotal = n("dilutedTotal");
+      const stockAmount = n("stockAmount");
+
+      let dilutionByTotalHtml = "";
+      dilutionByTotalHtml += row2("cDNA原液", dilutedTotal / 10);
+      dilutionByTotalHtml += row2("滅菌水", dilutedTotal * 9 / 10);
+      dilutionByTotalHtml += row2("10倍希釈後の総量", dilutedTotal, "result");
+      document.getElementById("dilutionByTotal").innerHTML = dilutionByTotalHtml;
+
+      let dilutionByStockHtml = "";
+      dilutionByStockHtml += row2("cDNA原液", stockAmount);
+      dilutionByStockHtml += row2("滅菌水", stockAmount * 9);
+      dilutionByStockHtml += row2("10倍希釈後の総量", stockAmount * 10, "result");
+      document.getElementById("dilutionByStock").innerHTML = dilutionByStockHtml;
+    }
+    function resetDefaults(){
+      document.getElementById("samples").value = defaults.samples;
+      document.getElementById("genes").value = defaults.genes;
+      calc();
+    }
+    ["samples", "genes", "dilutedTotal", "stockAmount"].forEach(id => document.getElementById(id).addEventListener("input", calc));
+    calc();
+  </script>
+</body>
+</html>
