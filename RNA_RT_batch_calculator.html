@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RNA RT一括計算表</title>
+  <style>
+    body {
+      font-family: Arial, "Hiragino Sans", "Yu Gothic", sans-serif;
+      background: #f6f7f9;
+      margin: 0;
+      padding: 30px;
+      color: #222;
+    }
+
+    .container {
+      max-width: 760px;
+      margin: 0 auto;
+      background: white;
+      padding: 24px;
+      border-radius: 14px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+    }
+
+    h1 {
+      font-size: 24px;
+      margin-top: 0;
+      text-align: center;
+    }
+
+    label {
+      display: block;
+      margin-top: 16px;
+      font-weight: bold;
+    }
+
+    input, textarea {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px;
+      margin-top: 6px;
+      font-size: 16px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      font-family: inherit;
+    }
+
+    textarea {
+      min-height: 150px;
+      resize: vertical;
+      line-height: 1.5;
+    }
+
+    button {
+      width: 100%;
+      margin-top: 22px;
+      padding: 12px;
+      font-size: 16px;
+      font-weight: bold;
+      border: none;
+      border-radius: 8px;
+      background: #2d6cdf;
+      color: white;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #1f55b5;
+    }
+
+    .result {
+      margin-top: 22px;
+      overflow-x: auto;
+      display: none;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 15px;
+      background: white;
+    }
+
+    th, td {
+      border: 1px solid #ddd;
+      padding: 9px;
+      text-align: center;
+    }
+
+    th {
+      background: #eef4ff;
+    }
+
+    .error-cell {
+      color: #b00020;
+      font-weight: bold;
+    }
+
+    .note {
+      margin-top: 18px;
+      font-size: 13px;
+      color: #666;
+      line-height: 1.6;
+    }
+
+    .copy-box {
+      margin-top: 18px;
+      display: none;
+    }
+
+    .copy-box textarea {
+      min-height: 120px;
+      font-size: 14px;
+      background: #fafafa;
+    }
+
+    .small-button {
+      margin-top: 10px;
+      background: #555;
+    }
+
+    .small-button:hover {
+      background: #333;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>RNA RT一括計算表</h1>
+
+    <label for="target">RTに使うRNA量（μg）</label>
+    <input type="number" id="target" step="0.01" placeholder="例：1">
+
+    <label for="concentrations">RNA濃度（ng/μL）を1行ずつ入力</label>
+    <textarea id="concentrations" placeholder="例：
+288.5
+289.3
+251.0
+300.5
+149.9
+231.1"></textarea>
+
+    <button onclick="calculate()">一括計算する</button>
+
+    <div id="result" class="result"></div>
+
+    <div id="copyBox" class="copy-box">
+      <label for="copyText">コピー用結果</label>
+      <textarea id="copyText" readonly></textarea>
+      <button class="small-button" onclick="copyResult()">結果をコピーする</button>
+    </div>
+
+    <div class="note">
+      計算式：RNA量（μL）＝ 目標RNA量（μg）×1000 ÷ RNA濃度（ng/μL）<br>
+      水量（μL）＝ 12.5 − RNA量（μL）<br>
+      空行は自動で無視される。結果は小数点以下2桁で表示される。
+    </div>
+  </div>
+
+  <script>
+    function calculate() {
+      const target = parseFloat(document.getElementById("target").value);
+      const inputText = document.getElementById("concentrations").value;
+      const result = document.getElementById("result");
+      const copyBox = document.getElementById("copyBox");
+      const copyText = document.getElementById("copyText");
+
+      result.style.display = "block";
+      copyBox.style.display = "none";
+
+      if (isNaN(target) || target <= 0) {
+        result.innerHTML = '<p class="error-cell">RTに使うRNA量を正しく入力してください。</p>';
+        return;
+      }
+
+      const lines = inputText
+        .split(/\n/)
+        .map(line => line.trim())
+        .filter(line => line !== "");
+
+      if (lines.length === 0) {
+        result.innerHTML = '<p class="error-cell">RNA濃度を1行以上入力してください。</p>';
+        return;
+      }
+
+      let html = "<table>";
+      html += "<tr><th>No.</th><th>RNA濃度<br>ng/μL</th><th>RNA<br>μL</th><th>水<br>μL</th><th>合計<br>μL</th><th>判定</th></tr>";
+
+      let copyLines = [];
+      copyLines.push("No.\tRNA濃度(ng/μL)\tRNA(μL)\t水(μL)\t合計(μL)\t判定");
+
+      lines.forEach((line, index) => {
+        const concentration = parseFloat(line);
+        const no = index + 1;
+
+        if (isNaN(concentration) || concentration <= 0) {
+          html += `<tr>
+            <td>${no}</td>
+            <td>${line}</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td class="error-cell">入力エラー</td>
+          </tr>`;
+          copyLines.push(`${no}\t${line}\t-\t-\t-\t入力エラー`);
+          return;
+        }
+
+        const rnaVolume = (target * 1000) / concentration;
+        const waterVolume = 12.5 - rnaVolume;
+
+        if (waterVolume < 0) {
+          html += `<tr>
+            <td>${no}</td>
+            <td>${concentration.toFixed(2)}</td>
+            <td>${rnaVolume.toFixed(2)}</td>
+            <td>-</td>
+            <td>-</td>
+            <td class="error-cell">濃度が低すぎる</td>
+          </tr>`;
+          copyLines.push(`${no}\t${concentration.toFixed(2)}\t${rnaVolume.toFixed(2)}\t-\t-\t濃度が低すぎる`);
+        } else {
+          html += `<tr>
+            <td>${no}</td>
+            <td>${concentration.toFixed(2)}</td>
+            <td>${rnaVolume.toFixed(2)}</td>
+            <td>${waterVolume.toFixed(2)}</td>
+            <td>12.50</td>
+            <td>OK</td>
+          </tr>`;
+          copyLines.push(`${no}\t${concentration.toFixed(2)}\t${rnaVolume.toFixed(2)}\t${waterVolume.toFixed(2)}\t12.50\tOK`);
+        }
+      });
+
+      html += "</table>";
+      result.innerHTML = html;
+
+      copyText.value = copyLines.join("\n");
+      copyBox.style.display = "block";
+    }
+
+    function copyResult() {
+      const copyText = document.getElementById("copyText");
+      copyText.select();
+      copyText.setSelectionRange(0, 99999);
+      document.execCommand("copy");
+    }
+  </script>
+</body>
+</html>
